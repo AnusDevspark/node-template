@@ -1,0 +1,160 @@
+// Prisma 7 schema.
+//
+// The client is generated as TypeScript source into src/generated/prisma and is
+// compiled by our own tsc as part of `npm run build`. That is why the output path
+// lives under src/ rather than at the repo root — it needs to be inside rootDir.
+//
+// The connection URL is NOT here; Prisma 7 reads it from prisma.config.ts.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  firstName    String     @db.VarChar(100)
+  lastName     String     @db.VarChar(100)
+  email        String     @unique @db.VarChar(255)
+  passwordHash String
+  status       UserStatus @default(ACTIVE)
+
+  // One role per user. Deliberately not a many-to-many: nothing in the current
+  // domain needs a user to hold two roles at once, and a join table would add a
+  // hop to every permission check. See docs/architecture.md for the migration path.
+  roleId String @db.Uuid
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  refreshSessions RefreshSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // email is already indexed by @unique — that index serves the login lookup.
+  @@index([roleId]) // permission resolution joins Role on every authorize call
+  @@index([status]) // admin list filtering by account status
+  @@index([createdAt]) // default sort order for GET /users
+  @@map("users")
+}
+
+model Role {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique @db.VarChar(50)
+  description String? @db.VarChar(255)
+
+  users       User[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid()) @db.Uuid
+  // Machine key, e.g. PROVIDER_CREATE. Mirrors the PERMISSIONS constant in code.
+  key         String  @unique @db.VarChar(64)
+  description String? @db.VarChar(255)
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+
+  @@map("permissions")
+}
+
+// Pure join table: the composite primary key IS the natural key, so no surrogate id.
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId]) // reverse lookup: which roles grant permission X
+  @@map("role_permissions")
+}
+
+/// One row per issued refresh token.
+///
+/// The raw token is never stored — only its SHA-256 hash — so a database dump
+/// cannot be replayed against the API. `familyId` groups a rotation chain: when
+/// a token that has already been rotated is presented again, that is a replay,
+/// and the entire family is revoked.
+model RefreshSession {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique @db.Char(64)
+
+  /// Rotation chain id. Every refresh issues a new row sharing this value.
+  familyId String @db.Uuid
+
+  /// Set when this token is rotated away, revoked on logout, or killed by a
+  /// replay-triggered family revocation. A null value means "currently valid".
+  revokedAt DateTime?
+
+  /// Audit trail: the hash of the token that superseded this one.
+  replacedByTokenHash String? @db.Char(64)
+
+  /// Optional client fingerprints so a user can recognise their own sessions.
+  /// Both are personal data — see docs/architecture.md for the retention tradeoff.
+  ipAddress String? @db.VarChar(64)
+  userAgent String? @db.VarChar(255)
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId]) // "log me out everywhere" and session listing
+  @@index([familyId]) // replay detection revokes by family
+  @@index([expiresAt]) // periodic cleanup of expired rows
+  @@map("refresh_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Example business domain
+// ---------------------------------------------------------------------------
+
+/// Demonstrates the full stack: schema -> repository -> service -> controller,
+/// with pagination, whitelisted filtering, whitelisted sorting and search.
+///
+/// Deleted hard, not soft: `isActive` already models "not currently practising",
+/// and a `deletedAt` column would force a filter into every query and break the
+/// unique email constraint. docs/architecture.md documents how to add soft delete.
+model Provider {
+  id          String   @id @default(uuid()) @db.Uuid
+  firstName   String   @db.VarChar(100)
+  lastName    String   @db.VarChar(100)
+  dateOfBirth DateTime @db.Date
+  email       String   @unique @db.VarChar(255)
+  speciality  String   @db.VarChar(100)
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive]) // GET /providers/active and the isActive filter
+  @@index([speciality]) // speciality filter
+  @@index([lastName, firstName]) // default name sort; also helps name prefix search
+  @@index([createdAt]) // recency sort, the most common list ordering
+  @@map("providers")
+}

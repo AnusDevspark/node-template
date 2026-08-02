@@ -1,0 +1,86 @@
+# Local development stack.
+#
+# The default `docker compose up -d` starts ONLY PostgreSQL. That is deliberate:
+# the fastest inner loop is running the API on the host with `npm run dev`
+# (instant reload, native debugger, no volume-mount performance tax) against a
+# containerised database.
+#
+# To run the API in a container too — to check the production image, or to hand
+# someone a one-command setup — use the profile:
+#     docker compose --profile api up -d
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: node-template-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-app_dev}
+    ports:
+      # Exposed so the host-run API and Prisma Studio can reach it.
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # Postgres 18+ expects the mount at /var/lib/postgresql, not at
+      # /var/lib/postgresql/data as in every older image. The data then lives in
+      # a version-named subdirectory, which is what makes `pg_upgrade --link`
+      # possible across major versions. Mounting the old path makes the
+      # container refuse to start.
+      - postgres-data:/var/lib/postgresql
+      # Creates the separate test database on first boot. Integration tests
+      # truncate every table, so they must never point at the dev database.
+      - ./docker/init-test-db.sh:/docker-entrypoint-initdb.d/init-test-db.sh:ro
+    healthcheck:
+      # `pg_isready` returns success before Postgres finishes its first-boot
+      # initialisation, so the dependent service waits on this rather than on
+      # the container merely being up.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-app_dev}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    profiles: ['api']
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: node-template-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        # Do not start the API until the database actually accepts connections —
+        # the server exits on a failed initial connection by design.
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # `postgres` is the compose service name; inside the network it resolves
+      # to the database container, not localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-app_dev}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # One proxy hop is the common production shape (nginx / ALB in front).
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    ports:
+      - '${PORT:-3000}:3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres-data:
+    driver: local

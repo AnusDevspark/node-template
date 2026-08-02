@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2023"],
+    "module": "node16",
+    "moduleResolution": "node16",
+
+    "rootDir": ".",
+    "outDir": "dist",
+
+    /* Path aliases, written without `baseUrl` so the config also compiles under
+       TypeScript 7, which removed it. `tsx` resolves these in dev,
+       `vite-tsconfig-paths` resolves them in Vitest, and `tsc-alias` rewrites
+       them to relative paths in the built output.
+
+       TypeScript is pinned to 5.9 rather than 7 only because typescript-eslint
+       still caps its peer range at <6.1 — a template whose `npm run lint` cannot
+       run is not finished. Bump both together when that support lands; nothing
+       in this file needs to change. */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Prisma 7 generates the client as TypeScript source whose internal imports
+       carry explicit `.ts` extensions. These two flags let tsc consume that source
+       and rewrite those specifiers to `.js` on emit. */
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "declaration": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "prisma/**/*.ts", "scripts/**/*.ts", "*.ts"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

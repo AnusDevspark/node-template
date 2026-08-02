@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* The root tsconfig covers tests/scripts/prisma so the editor and `npm run
+       typecheck` see everything. The production build compiles only `src`, so
+       `dist/server.js` sits at the top of `dist` rather than `dist/src/server.js`. */
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "sourceMap": false,
+    "removeComments": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage", "tests", "scripts", "**/*.test.ts"]
+}
