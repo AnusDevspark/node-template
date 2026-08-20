@@ -14,7 +14,7 @@ docker compose up -d postgres   # Postgres + the app_test database
 npm run db:wait                 # blocks until it accepts connections
 
 npm run prisma:migrate          # creates the schema
-npm run prisma:seed             # roles, permissions, admin, 5 sample providers
+npm run prisma:seed             # roles, permissions, admin, 5 sample accounts
 
 npm run dev
 ```
@@ -23,10 +23,10 @@ Four URLs to check:
 
 | URL                              | Expect                                                         |
 | -------------------------------- | -------------------------------------------------------------- |
-| <http://localhost:3000/health>   | `"status":"healthy"`, `"database":"up"`                        |
-| <http://localhost:3000/api/v1>   | Service name and version                                       |
-| <http://localhost:3000/api/docs> | Swagger UI                                                     |
-| <http://localhost:3000/nope>     | `{"success":false,"message":"Route not found: GET /nope",...}` |
+| <http://localhost:4000/health>   | `"status":"healthy"`, `"database":"up"`                        |
+| <http://localhost:4000/api/v1>   | Service name and version                                       |
+| <http://localhost:4000/api/docs> | Swagger UI                                                     |
+| <http://localhost:4000/nope>     | `{"success":false,"message":"Route not found: GET /nope",...}` |
 
 If `/health` says `database: down`, the container is up but Postgres is still initialising — `npm run db:wait`.
 
@@ -37,7 +37,7 @@ If `/health` says `database: down`, the container is up but Postgres is still in
 The seed creates an admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`.
 
 ```bash
-curl -s -X POST localhost:3000/api/v1/auth/login \
+curl -s -X POST localhost:4000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"ChangeMe123!"}'
 ```
@@ -62,30 +62,36 @@ Save the access token and use it:
 
 ```bash
 TOKEN="paste-accessToken-here"
-curl -s localhost:3000/api/v1/providers -H "Authorization: Bearer $TOKEN"
-curl -s localhost:3000/api/v1/auth/me   -H "Authorization: Bearer $TOKEN"
+curl -s localhost:4000/api/v1/users   -H "Authorization: Bearer $TOKEN"
+curl -s localhost:4000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 ```
+
+`/auth/me` returns your permission keys alongside the profile. That array is what a
+frontend uses to decide what to render — see `API-CONTRACT.md`.
 
 Or click **Authorize** in Swagger UI and paste the token once — it persists across reloads.
 
 ### Try the things that make this a template, not a demo
 
 ```bash
-API=localhost:3000/api/v1
+API=localhost:4000/api/v1
 
 # Pagination metadata
-curl -s "$API/providers?page=1&pageSize=2" -H "Authorization: Bearer $TOKEN"
+curl -s "$API/users?page=1&pageSize=2" -H "Authorization: Bearer $TOKEN"
 
 # Case-insensitive search across firstName, lastName, email
-curl -s "$API/providers?search=JOHN" -H "Authorization: Bearer $TOKEN"
+curl -s "$API/users?search=JOHN" -H "Authorization: Bearer $TOKEN"
 
 # Sorting is whitelisted — this one is rejected with a 400, not silently ignored
-curl -s "$API/providers?sortBy=id" -H "Authorization: Bearer $TOKEN"
+curl -s "$API/users?sortBy=passwordHash" -H "Authorization: Bearer $TOKEN"
+
+# So is an oversized page — a 400, never a silent clamp
+curl -s "$API/users?pageSize=101" -H "Authorization: Bearer $TOKEN"
 
 # Validation collects every field error at once
-curl -s -X POST "$API/providers" -H "Authorization: Bearer $TOKEN" \
+curl -s -X POST "$API/users" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"firstName":"","email":"nope","dateOfBirth":"2099-01-01"}'
+  -d '{"firstName":"","email":"nope","password":"short"}'
 ```
 
 ### Watch a permission denial
@@ -97,14 +103,21 @@ USER_TOKEN=$(curl -s -X POST $API/auth/register -H 'Content-Type: application/js
   -d '{"firstName":"Reg","lastName":"User","email":"reg@example.com","password":"RegularPass123"}' \
   | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).data.tokens.accessToken))")
 
-# 200 — a USER holds PROVIDER_VIEW
-curl -s "$API/providers" -H "Authorization: Bearer $USER_TOKEN"
+# 200 — anyone signed in may read their own profile
+curl -s "$API/auth/me" -H "Authorization: Bearer $USER_TOKEN"
 
-# 403 PERMISSION_DENIED — a USER does not hold PROVIDER_CREATE
-curl -s -X POST "$API/providers" -H "Authorization: Bearer $USER_TOKEN" \
+# 403 PERMISSION_DENIED — the USER role holds no USER_VIEW grant
+curl -s "$API/users" -H "Authorization: Bearer $USER_TOKEN"
+
+# 403 again — nor USER_CREATE
+curl -s -X POST "$API/users" -H "Authorization: Bearer $USER_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"firstName":"A","lastName":"B","dateOfBirth":"1990-01-01","email":"a@b.com","speciality":"X"}'
+  -d '{"firstName":"A","lastName":"B","email":"a@b.com","password":"LongEnough123","role":"USER"}'
 ```
+
+The seeded `USER` role deliberately holds **no** permissions. Editing your own profile is
+not one — it is an ownership rule enforced in `UserService`, which is why
+`PATCH /users/:id` has no permission gate on the route.
 
 ### Watch refresh-token theft detection
 
@@ -165,18 +178,19 @@ The app refuses to boot in production if they match, but it cannot tell that you
 
 Changing `JWT_ISSUER` / `JWT_AUDIENCE` invalidates every existing token — do it before you have users, not after.
 
-### Decide what to delete
+### There is nothing to delete
 
-The Provider module is a worked example, not a dependency. When you are comfortable with the patterns:
+This template ships no business domain on purpose. The only resource is `User`, and you
+need it — authentication depends on it. So there is no sample module to strip out, and
+nothing in the code to mislead you (or a coding assistant) about what your project is.
 
-```bash
-rm -rf src/modules/provider
-rm tests/unit/provider.service.test.ts tests/integration/provider.integration.test.ts
-```
+`src/modules/user/` doubles as the reference implementation: it exercises pagination,
+whitelisted filtering, whitelisted sorting, search, an ownership rule and a mapper. Copy
+its shape for your first real module, and follow
+[adding-a-module.md](./adding-a-module.md) for the step-by-step version.
 
-Then remove its wiring from `src/routes/index.ts`, its `PROVIDER_*` permissions from `src/shared/constants/permissions.constant.ts`, its paths from `src/docs/openapi.ts`, and the `Provider` model from `prisma/schema.prisma`.
-
-**Keep it until your first module is working.** It is the reference you will copy from, and [adding-a-module.md](./adding-a-module.md) assumes it exists.
+The sample *accounts* the seed creates (five of them, so a list has something to
+paginate) are skipped when `NODE_ENV=production`.
 
 ### Things you probably should not remove
 

@@ -2,7 +2,6 @@ import type { Request, Response } from 'express';
 import { sendCreated, sendNoContent, sendSuccess } from '@/shared/response/send-response.util';
 import { requireAuthenticatedUser } from '@/shared/utils/auth-context.util';
 import type { AuthService } from '@/modules/auth/auth.service';
-import type { UserService } from '@/modules/user/user.service';
 import type { SessionContext } from '@/modules/auth/auth.types';
 import type {
   ChangePasswordInput,
@@ -35,10 +34,7 @@ import type {
  * unchanged. Add CSRF protection when you do.
  */
 export class AuthController {
-  constructor(
-    private readonly authService: AuthService,
-    private readonly userService: UserService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   private sessionContext(req: Request): SessionContext {
     const userAgent = req.get('user-agent');
@@ -74,7 +70,9 @@ export class AuthController {
 
   me = async (req: Request, res: Response): Promise<void> => {
     const { id } = requireAuthenticatedUser(req);
-    const user = await this.userService.getProfile(id);
+    // Not UserService.getProfile: the client needs its permission keys to decide
+    // what to render, and those belong to the session rather than the record.
+    const user = await this.authService.getSessionUser(id);
     sendSuccess(res, user);
   };
 

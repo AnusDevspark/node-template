@@ -51,9 +51,21 @@ export class NotFoundError extends AppError {
   }
 }
 
+/**
+ * A uniqueness or state conflict, e.g. an email already registered.
+ *
+ * `field` is optional but worth passing whenever the conflict is *about* one:
+ * it produces the same `errors: [{ field, message }]` array a validation failure
+ * does, which is what lets a client drop the message next to the offending input
+ * instead of showing a detached banner. "This email is already in use" belongs
+ * under the email box.
+ */
 export class ConflictError extends AppError {
-  constructor(message = 'Resource already exists') {
-    super(message, 409, { code: ERROR_CODES.CONFLICT });
+  constructor(message = 'Resource already exists', field?: string) {
+    super(message, 409, {
+      code: ERROR_CODES.CONFLICT,
+      ...(field ? { errors: [{ field, message }] } : {}),
+    });
   }
 }
 

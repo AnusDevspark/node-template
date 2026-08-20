@@ -31,7 +31,7 @@ A service takes its collaborators through the constructor and never imports a si
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderService } from '@/modules/provider/provider.service';
+import { UserService } from '@/modules/user/user.service';
 import { ConflictError } from '@/errors';
 
 function createMockRepository() {
@@ -46,20 +46,20 @@ function createMockRepository() {
   };
 }
 
-describe('ProviderService', () => {
+describe('UserService', () => {
   let repository: ReturnType<typeof createMockRepository>;
-  let service: ProviderService;
+  let service: UserService;
 
   beforeEach(() => {
     repository = createMockRepository();
     const prisma = { $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb({})) };
-    service = new ProviderService(repository as never, prisma as never);
+    service = new UserService(repository as never, prisma as never);
   });
 
   it('throws ConflictError when the email is taken', async () => {
     repository.findByEmail.mockResolvedValue({ id: 'existing' });
 
-    await expect(service.createProvider(input)).rejects.toThrow(ConflictError);
+    await expect(service.createUser(input)).rejects.toThrow(ConflictError);
     expect(repository.create).not.toHaveBeenCalled(); // rejected before any write
   });
 });
@@ -102,11 +102,11 @@ beforeEach(async () => {
   await resetDatabase();
 });
 
-it('forbids a standard USER from creating a provider', async () => {
+it('forbids a standard USER from creating a user', async () => {
   const { headers } = await authenticatedRequest({ role: ROLES.USER });
 
   const response = await request(app)
-    .post(`${API_BASE_PATH}/providers`)
+    .post(`${API_BASE_PATH}/users`)
     .set(headers)
     .send({/* … */})
     .expect(403);
@@ -167,7 +167,6 @@ const TABLES = [
   'users',
   'permissions',
   'roles',
-  'providers',
 ];
 ```
 
@@ -207,7 +206,7 @@ Pattern: **test the security property, not the happy path.** The happy path brea
 3. Integration test: permission denials, validation, the happy path, and any state machine.
 
 ```bash
-npx vitest run tests/unit/provider.service.test.ts
+npx vitest run tests/unit/user.service.test.ts
 npx vitest run --config vitest.integration.config.mts -t "double-book"
 ```
 

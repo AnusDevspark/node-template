@@ -1,4 +1,4 @@
-import type { UserResponse } from '@/modules/user/user.types';
+import type { SessionUserResponse } from '@/modules/user/user.types';
 
 /** What the auth module returns and stores. */
 
@@ -11,7 +11,7 @@ export interface AuthTokens {
 }
 
 export interface AuthResult {
-  user: UserResponse;
+  user: SessionUserResponse;
   tokens: AuthTokens;
 }
 

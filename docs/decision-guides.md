@@ -75,7 +75,7 @@ Ownership cannot live in middleware — middleware does not know which record is
 | Person name                    | `personNameSchema`                                             |
 | `?flag=true` in a query string | `booleanQueryParam`                                            |
 | Number in a query string       | `z.coerce.number()`                                            |
-| Date only (birthday)           | Regex + explicit UTC construction — see `provider.schema.ts`   |
+| Date only (birthday)           | Regex + explicit UTC construction — see `common.schema.ts`   |
 | Date and time                  | `z.iso.datetime({ offset: true }).transform(v => new Date(v))` |
 | Prisma enum                    | `z.enum(TheEnum)`                                              |
 | Cross-field rule               | `.refine(...)` on the object                                   |
@@ -143,7 +143,7 @@ The service opens it; repositories accept `tx`. Keep it short.
 | "I'll add a cache"                                             | Only after profiling names the query. A cache is a second source of truth and an invalidation bug                                                  |
 | "Redis would help"                                             | When you run 2+ instances (shared rate limiting), or you need a job queue. Not before                                                              |
 | "A repository interface would let me swap the ORM"             | No. You will not swap the ORM. The class is already the seam                                                                                       |
-| "This service is getting long"                                 | Split by **use case**, not one-class-per-method. `AppointmentBookingService` + `AppointmentScheduleService` beats twelve classes                   |
+| "This service is getting long"                                 | Split by **use case**, not one-class-per-method. `TaskBookingService` + `TaskScheduleService` beats twelve classes                   |
 
 The test: **does removing it make the code worse?** If not, do not add it.
 
@@ -167,7 +167,6 @@ Starting a small project from this template:
 | Refresh rotation + families      | Keep rotation and hashing. Family revocation is droppable for low-risk apps                                                 |
 | DB-backed RBAC                   | Cut for a small app — a role enum and `authorizeRoles` is fine. Keep the permission _call sites_ so upgrading is mechanical |
 | OpenAPI                          | Cut if you own both ends and dislike maintaining it                                                                         |
-| Provider module                  | Cut once your own modules exist                                                                                             |
 | Integration tests                | **Keep the harness** even if you write few tests                                                                            |
 
 Becomes important at scale: shared rate-limit store, read replicas, background workers, caching, `pg_trgm` search, cursor pagination, metrics and tracing.

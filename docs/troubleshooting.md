@@ -204,9 +204,9 @@ Remember the store is per process — restarting the dev server clears it.
 
 Two usual causes:
 
-**Missing version prefix** — everything is under `/api/v1`, e.g. `/api/v1/providers`.
+**Missing version prefix** — everything is under `/api/v1`, e.g. `/api/v1/users`.
 
-**A literal segment declared after `/:id`.** Express matches in order, so `/providers/active` must come _before_ `/providers/:id` or "active" is parsed as an id and fails UUID validation.
+**A literal segment declared after `/:id`.** Express matches in order, so `/users/active` must come _before_ `/users/:id` or "active" is parsed as an id and fails UUID validation.
 
 ### CORS blocked in the browser
 

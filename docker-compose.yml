@@ -67,7 +67,9 @@ services:
       # One proxy hop is the common production shape (nginx / ALB in front).
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
     ports:
-      - '${PORT:-3000}:3000'
+      # Host 4000 so the container does not collide with the Next.js dev server;
+      # inside the network the app still listens on 3000.
+      - '${PORT:-4000}:3000'
     healthcheck:
       test:
         [

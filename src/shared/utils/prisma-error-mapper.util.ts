@@ -37,7 +37,11 @@ export function mapPrismaError(error: unknown, resourceName = 'Resource'): unkno
       case 'P2002': {
         const fields = extractTargetFields(error.meta);
         const detail = fields.length > 0 ? ` with this ${fields.join(', ')}` : '';
-        return new ConflictError(`${resourceName}${detail} already exists`);
+        // Postgres names the offending column, so pass it along as the field —
+        // that is what puts "already exists" next to the right input instead of
+        // in a detached banner. Composite constraints name several; the first is
+        // the one a form can usefully highlight.
+        return new ConflictError(`${resourceName}${detail} already exists`, fields[0]);
       }
 
       // An operation (update/delete) targeted a row that does not exist.

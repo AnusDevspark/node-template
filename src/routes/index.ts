@@ -19,11 +19,6 @@ import { AuthController } from '@/modules/auth/auth.controller';
 import { createAuthRouter } from '@/modules/auth/auth.routes';
 import { ConsoleEmailService } from '@/modules/auth/email.service';
 
-import { ProviderRepository } from '@/modules/provider/provider.repository';
-import { ProviderService } from '@/modules/provider/provider.service';
-import { ProviderController } from '@/modules/provider/provider.controller';
-import { createProviderRouter } from '@/modules/provider/provider.routes';
-
 /**
  * ===========================================================================
  * Composition root
@@ -32,8 +27,8 @@ import { createProviderRouter } from '@/modules/provider/provider.routes';
  *
  * Why no DI container: with a handful of modules, a container replaces code you
  * can read with configuration you cannot. The wiring below states the entire
- * dependency graph in twenty lines — you can see that ProviderController has
- * exactly one dependency, and swapping ConsoleEmailService for a real provider
+ * dependency graph in twenty lines — you can see that UserController has
+ * exactly one dependency, and swapping ConsoleEmailService for a real transport
  * is a one-line change with a compiler error if the shape is wrong.
  *
  * The rule this file enforces: classes receive their collaborators through the
@@ -51,18 +46,21 @@ export function createApiRouter(prisma: PrismaClientInstance): Router {
   const rbacRepository = new RbacRepository(prisma);
   const userRepository = new UserRepository(prisma);
   const authRepository = new AuthRepository(prisma);
-  const providerRepository = new ProviderRepository(prisma);
 
   // --- Services (business logic) -------------------------------------------
   const rbacService = new RbacService(rbacRepository);
   const userService = new UserService(userRepository, rbacService);
-  const authService = new AuthService(prisma, userRepository, authRepository, emailService);
-  const providerService = new ProviderService(providerRepository, prisma);
+  const authService = new AuthService(
+    prisma,
+    userRepository,
+    authRepository,
+    rbacService,
+    emailService,
+  );
 
   // --- Controllers (HTTP) ---------------------------------------------------
   const userController = new UserController(userService);
-  const authController = new AuthController(authService, userService);
-  const providerController = new ProviderController(providerService);
+  const authController = new AuthController(authService);
 
   // --- Middleware that needs dependencies -----------------------------------
   // These are factories rather than plain middleware precisely so they can be
@@ -92,10 +90,6 @@ export function createApiRouter(prisma: PrismaClientInstance): Router {
   apiRouter.use(
     '/users',
     createUserRouter({ controller: userController, authenticate, requirePermission }),
-  );
-  apiRouter.use(
-    '/providers',
-    createProviderRouter({ controller: providerController, authenticate, requirePermission }),
   );
 
   // Mount the whole versioned surface under one prefix.

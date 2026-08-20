@@ -120,75 +120,58 @@ async function seedAdmin(roleIds: Map<string, string>): Promise<void> {
 }
 
 /**
- * Sample providers, for development only.
+ * Sample user accounts, for development only.
  *
- * Guarded by NODE_ENV so a production seed never inserts fake business data.
+ * These exist so GET /users returns more than one row: pagination, search and
+ * sorting are impossible to eyeball against a single record. The mix of roles
+ * and statuses is deliberate — it gives the status and role filters something
+ * to actually filter.
+ *
+ * Guarded by NODE_ENV so a production seed never inserts fake accounts. They all
+ * share one throwaway password, which is safe precisely because this never runs
+ * in production.
  */
-async function seedSampleProviders(): Promise<void> {
+const SAMPLE_USER_PASSWORD = 'DevPassword123!';
+
+async function seedSampleUsers(roleIds: Map<string, string>): Promise<void> {
   if (process.env['NODE_ENV'] === 'production') {
-    console.log('  providers: skipped in production');
+    console.log('  sample users: skipped in production');
     return;
   }
 
   const samples = [
-    {
-      firstName: 'Ada',
-      lastName: 'Okafor',
-      dateOfBirth: '1981-03-14',
-      email: 'ada.okafor@example.com',
-      speciality: 'Cardiology',
-      isActive: true,
-    },
-    {
-      firstName: 'John',
-      lastName: 'Mercer',
-      dateOfBirth: '1975-11-02',
-      email: 'john.mercer@example.com',
-      speciality: 'Cardiology',
-      isActive: true,
-    },
-    {
-      firstName: 'Priya',
-      lastName: 'Raman',
-      dateOfBirth: '1988-07-21',
-      email: 'priya.raman@example.com',
-      speciality: 'Neurology',
-      isActive: true,
-    },
-    {
-      firstName: 'Tomas',
-      lastName: 'Lindqvist',
-      dateOfBirth: '1969-01-30',
-      email: 'tomas.lindqvist@example.com',
-      speciality: 'Orthopaedics',
-      isActive: false,
-    },
-    {
-      firstName: 'Johanna',
-      lastName: 'Weiss',
-      dateOfBirth: '1992-09-08',
-      email: 'johanna.weiss@example.com',
-      speciality: 'Dermatology',
-      isActive: true,
-    },
-  ];
+    { firstName: 'Ada', lastName: 'Okafor', role: ROLES.ADMIN, status: 'ACTIVE' },
+    { firstName: 'John', lastName: 'Mercer', role: ROLES.USER, status: 'ACTIVE' },
+    { firstName: 'Priya', lastName: 'Raman', role: ROLES.USER, status: 'ACTIVE' },
+    { firstName: 'Tomas', lastName: 'Lindqvist', role: ROLES.USER, status: 'INACTIVE' },
+    { firstName: 'Johanna', lastName: 'Weiss', role: ROLES.USER, status: 'SUSPENDED' },
+  ] as const;
+
+  // Hashed once rather than per row: Argon2 is intentionally slow, and five
+  // separate hashes of the same password would add seconds to every seed.
+  const passwordHash = await hashPassword(SAMPLE_USER_PASSWORD);
 
   for (const sample of samples) {
-    await prisma.provider.upsert({
-      where: { email: sample.email },
+    const roleId = roleIds.get(sample.role);
+    if (!roleId) continue;
+
+    const email = `${sample.firstName.toLowerCase()}.${sample.lastName.toLowerCase()}@example.com`;
+
+    await prisma.user.upsert({
+      where: { email },
       update: {},
       create: {
         firstName: sample.firstName,
         lastName: sample.lastName,
-        dateOfBirth: new Date(`${sample.dateOfBirth}T00:00:00.000Z`),
-        email: sample.email,
-        speciality: sample.speciality,
-        isActive: sample.isActive,
+        email,
+        passwordHash,
+        status: sample.status,
+        roleId,
       },
     });
   }
 
-  console.log(`  providers: ${samples.length} sample records ensured`);
+  console.log(`  sample users: ${samples.length} ensured (password: ${SAMPLE_USER_PASSWORD})`);
 }
 
 async function main(): Promise<void> {
@@ -197,7 +180,7 @@ async function main(): Promise<void> {
   const permissionIds = await seedPermissions();
   const roleIds = await seedRoles(permissionIds);
   await seedAdmin(roleIds);
-  await seedSampleProviders();
+  await seedSampleUsers(roleIds);
 
   console.log('Seed complete.');
 }

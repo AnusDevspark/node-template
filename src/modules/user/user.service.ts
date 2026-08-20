@@ -52,7 +52,7 @@ export class UserService {
     // the Prisma error mapper turns that into the same ConflictError.
     const existing = await this.userRepository.findByEmail(input.email);
     if (existing) {
-      throw new ConflictError('A user with this email already exists');
+      throw new ConflictError('A user with this email already exists', 'email');
     }
 
     const roleId = await this.userRepository.findRoleIdByName(input.role);
@@ -115,7 +115,7 @@ export class UserService {
     if (input.email && input.email !== target.email) {
       const existing = await this.userRepository.findByEmail(input.email);
       if (existing) {
-        throw new ConflictError('A user with this email already exists');
+        throw new ConflictError('A user with this email already exists', 'email');
       }
     }
 

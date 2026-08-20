@@ -92,42 +92,44 @@ Roles live in the database, so an operator can also create one at runtime withou
 
 ## Add a filter to an existing list endpoint
 
-Three places, all in the same module. Say you want `?minAge=30` on providers.
+Three places, all in the same module. Say you want `?activeWithinDays=30` on users — "show
+me people who have done something in the last month".
 
 **1. Schema** — declare it:
 
 ```ts
-// provider.schema.ts
-export const listProvidersQuerySchema = paginationSchema
-  .extend(sortingSchema(PROVIDER_SORT_FIELDS, 'createdAt').shape)
+// user.schema.ts
+export const listUsersQuerySchema = paginationSchema
+  .extend(sortingSchema(USER_SORT_FIELDS, 'createdAt').shape)
   .extend(searchSchema.shape)
   .extend({
-    isActive: booleanQueryParam.optional(),
-    speciality: z.string().trim().max(100).optional(),
-    minAge: z.coerce.number().int().min(0).max(120).optional(),
+    status: z.enum(UserStatus).optional(),
+    role: z.string().trim().max(50).optional(),
+    activeWithinDays: z.coerce.number().int().min(1).max(365).optional(),
   });
 ```
 
 **2. Filter type + `where`** — teach the repository:
 
 ```ts
-// provider.types.ts
-export interface ProviderListFilters {
+// user.types.ts
+export interface UserListFilters {
   search?: string;
-  isActive?: boolean;
-  speciality?: string;
-  maxDateOfBirth?: Date;   // "older than N" becomes "born before X"
+  status?: UserStatus;
+  role?: string;
+  /** The repository speaks in timestamps, not in "days ago". */
+  updatedAfter?: Date;
 }
 
-// provider.repository.ts
-private buildWhere(filters: ProviderListFilters) {
+// user.repository.ts
+private buildWhere(filters: UserListFilters) {
   return {
     ...omitUndefined({
-      isActive: filters.isActive,
-      speciality: filters.speciality,
-      dateOfBirth: filters.maxDateOfBirth ? { lte: filters.maxDateOfBirth } : undefined,
+      status: filters.status,
+      role: filters.role ? { name: filters.role } : undefined,
+      updatedAt: filters.updatedAfter ? { gte: filters.updatedAfter } : undefined,
     }),
-    ...buildSearchFilter(PROVIDER_SEARCH_FIELDS, filters.search),
+    ...buildSearchFilter(USER_SEARCH_FIELDS, filters.search),
   };
 }
 ```
@@ -135,19 +137,21 @@ private buildWhere(filters: ProviderListFilters) {
 **3. Service** — translate the request into the filter:
 
 ```ts
-const maxDateOfBirth = query.minAge
-  ? new Date(Date.now() - query.minAge * 365.25 * 24 * 60 * 60 * 1000)
+const updatedAfter = query.activeWithinDays
+  ? new Date(Date.now() - query.activeWithinDays * 24 * 60 * 60 * 1000)
   : undefined;
 
-const { items, total } = await this.providerRepository.findMany(
-  { search: query.search, isActive: query.isActive, speciality: query.speciality, maxDateOfBirth },
+const { items, total } = await this.userRepository.findMany(
+  { search: query.search, status: query.status, role: query.role, updatedAfter },
   pagination,
   query.sortBy,
   query.sortOrder,
 );
 ```
 
-Note the shape: the **API** speaks `minAge` (what a user thinks), the **repository** speaks `maxDateOfBirth` (what the column holds), and the **service** translates. Never forward `req.query` wholesale.
+Note the shape: the **API** speaks `activeWithinDays` (what a person asking the question
+thinks), the **repository** speaks `updatedAfter` (what the column holds), and the
+**service** translates between them. Never forward `req.query` wholesale.
 
 If the filter will be used often, index the column.
 
@@ -158,11 +162,11 @@ If the filter will be used often, index the column.
 One line — but check there is an index:
 
 ```ts
-export const PROVIDER_SORT_FIELDS = [
+export const USER_SORT_FIELDS = [
   'firstName',
   'lastName',
   'email',
-  'speciality',
+  'status',
   'createdAt',
   'updatedAt', // new
 ] as const;
@@ -177,39 +181,48 @@ The schema validates against this tuple and the repository whitelists against it
 Anything with rules ("approve", "cancel", "deactivate", "resend") is an endpoint, not a PATCH field.
 
 ```ts
-// provider.schema.ts
-export const deactivateProviderSchema = z.object({
+// user.schema.ts
+export const suspendUserSchema = z.object({
   reason: z.string().trim().min(1).max(500),
 });
 
-// provider.service.ts
-async deactivateProvider(id: string, reason: string): Promise<ProviderResponse> {
-  const provider = await this.providerRepository.findById(id);
-  if (!provider) throw new NotFoundError('Provider not found');
-  if (!provider.isActive) throw new ConflictError('Provider is already inactive');
+// user.service.ts
+async suspendUser(id: string, reason: string, actor: AuthenticatedUser): Promise<UserResponse> {
+  const target = await this.userRepository.findById(id);
+  if (!target) throw new NotFoundError('User not found');
+  if (target.status === UserStatus.SUSPENDED) {
+    throw new ConflictError('User is already suspended');
+  }
+  // Locking yourself out is never the intent.
+  if (target.id === actor.id) {
+    throw new ForbiddenError('You cannot suspend your own account');
+  }
 
-  const updated = await this.providerRepository.update(id, { isActive: false });
-  logger.info({ providerId: id, reason }, 'provider deactivated');
-  return mapProviderToResponse(updated);
+  const updated = await this.userRepository.update(id, { status: UserStatus.SUSPENDED });
+  logger.info({ userId: id, actorId: actor.id, reason }, 'user suspended');
+  return mapUserToResponse(updated);
 }
 
-// provider.controller.ts
-deactivateProvider = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params as ProviderIdParam;
-  const { reason } = req.body as DeactivateProviderInput;
-  sendSuccess(res, await this.providerService.deactivateProvider(id, reason), 'Provider deactivated.');
+// user.controller.ts
+suspendUser = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params as UserIdParam;
+  const { reason } = req.body as SuspendUserInput;
+  const actor = requireAuthenticatedUser(req);
+  sendSuccess(res, await this.userService.suspendUser(id, reason, actor), 'User suspended.');
 };
 
-// provider.routes.ts
+// user.routes.ts
 router.post(
-  '/:id/deactivate',
-  requirePermission(PERMISSIONS.PROVIDER_EDIT),
-  validate({ params: providerIdParamSchema, body: deactivateProviderSchema }),
-  controller.deactivateProvider,
+  '/:id/suspend',
+  requirePermission(PERMISSIONS.USER_EDIT),
+  validate({ params: userIdParamSchema, body: suspendUserSchema }),
+  controller.suspendUser,
 );
 ```
 
-Why not `PATCH { isActive: false }`: the endpoint can require a reason, enforce preconditions, use a distinct permission, and be logged and audited as a specific event.
+Why not `PATCH { status: "SUSPENDED" }`: the endpoint can require a reason, enforce
+preconditions, refuse self-suspension, use a distinct permission, and be logged and
+audited as a specific event. A PATCH would skip every one of those.
 
 ---
 
@@ -230,18 +243,18 @@ Rules:
 - **Throwing inside the callback rolls everything back.** That is the mechanism — do not catch and continue.
 - **Pass `tx` to every repository call inside**, or that call runs outside the transaction and will not roll back.
 - **Keep it short.** A transaction holds locks and a pooled connection. Never do an HTTP request inside one.
-- Inject `prisma` into the service constructor (see `ProviderService`).
+- Inject `prisma` into the service constructor (see `UserService`).
 
-`ProviderService.importProviders` is a working example, with a test proving rollback.
+`AuthService.changePassword` is a working example: it rewrites the password and revokes every other session in one transaction, and an integration test proves the rollback.
 
 ---
 
 ## Add a database index
 
 ```prisma
-model Appointment {
+model Task {
   // …
-  @@index([providerId, scheduledAt])
+  @@index([assigneeId, startsAt])
 }
 ```
 
@@ -252,7 +265,7 @@ npm run prisma:migrate
 Add one when a query filters or sorts by that column often. **Do not index everything** — each index slows writes and costs storage. Confirm with real data:
 
 ```sql
-EXPLAIN ANALYZE SELECT * FROM providers WHERE speciality = 'Cardiology' ORDER BY created_at DESC LIMIT 20;
+EXPLAIN ANALYZE SELECT * FROM users WHERE role_id = '…' AND status = 'ACTIVE' ORDER BY created_at DESC LIMIT 20;
 ```
 
 `Seq Scan` on a large table means you want an index. Composite index column order matters: put the equality-filtered column first, the sorted one second.
@@ -260,7 +273,7 @@ EXPLAIN ANALYZE SELECT * FROM providers WHERE speciality = 'Cardiology' ORDER BY
 On a large production table, create the index concurrently to avoid locking writes — edit the generated migration SQL:
 
 ```sql
-CREATE INDEX CONCURRENTLY "appointments_provider_id_scheduled_at_idx" ON "appointments"("provider_id", "scheduled_at");
+CREATE INDEX CONCURRENTLY "tasks_assignee_id_starts_at_idx" ON "tasks"("assignee_id", "starts_at");
 ```
 
 ---
@@ -363,7 +376,7 @@ Nothing in `AuthService` changes — that is the point of the interface.
 Just leave `authenticate` off that route. Note the module-wide `router.use(authenticate)` — a public route must be declared before it, or in a router that does not apply it.
 
 ```ts
-export function createProviderRouter({ controller, authenticate, requirePermission }) {
+export function createUserRouter({ controller, authenticate, requirePermission }) {
   const router = Router();
 
   // Public — declared BEFORE the authenticate guard.
@@ -443,13 +456,13 @@ Applies everywhere. Raise `MAX_PAGE_SIZE` reluctantly — it is the cap that sto
 // src/errors/app-error.ts
 export const ERROR_CODES = {
   // …
-  APPOINTMENT_SLOT_TAKEN: 'APPOINTMENT_SLOT_TAKEN',
+  TASK_SLOT_TAKEN: 'TASK_SLOT_TAKEN',
 } as const;
 ```
 
 ```ts
 throw new AppError('This slot is no longer available', 409, {
-  code: ERROR_CODES.APPOINTMENT_SLOT_TAKEN,
+  code: ERROR_CODES.TASK_SLOT_TAKEN,
 });
 ```
 
@@ -482,7 +495,7 @@ Remember the limiter store is **in-memory, per process**. With N instances the r
 ```ts
 import { logger } from '@/config/logger';
 
-logger.info({ providerId, userId: actor.id }, 'provider deactivated');
+logger.info({ assigneeId, userId: actor.id }, 'user deactivated');
 logger.warn({ userId }, 'repeated failed login');
 logger.error({ err: error, invoiceId }, 'invoice generation failed');
 ```

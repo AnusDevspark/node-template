@@ -1,4 +1,8 @@
-import type { UserResponse, UserWithRole } from '@/modules/user/user.types';
+import type {
+  SessionUserResponse,
+  UserResponse,
+  UserWithRole,
+} from '@/modules/user/user.types';
 
 /**
  * Database entity → API DTO.
@@ -25,4 +29,23 @@ export function mapUserToResponse(user: UserWithRole): UserResponse {
 
 export function mapUsersToResponse(users: UserWithRole[]): UserResponse[] {
   return users.map(mapUserToResponse);
+}
+
+/**
+ * The same DTO plus the caller's own permission keys.
+ *
+ * Permissions arrive as an argument rather than being read here because they
+ * come from the role, not the user row — the mapper stays a pure shape
+ * transform and the caller owns the lookup (and its cache).
+ */
+export function mapUserToSessionResponse(
+  user: UserWithRole,
+  permissions: Iterable<string>,
+): SessionUserResponse {
+  return {
+    ...mapUserToResponse(user),
+    // Sorted so the payload is stable between requests — it makes responses
+    // diffable in tests and cache-friendly.
+    permissions: [...permissions].sort(),
+  };
 }

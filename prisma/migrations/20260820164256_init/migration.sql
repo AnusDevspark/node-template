@@ -61,21 +61,6 @@ CREATE TABLE "refresh_sessions" (
     CONSTRAINT "refresh_sessions_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "providers" (
-    "id" UUID NOT NULL,
-    "firstName" VARCHAR(100) NOT NULL,
-    "lastName" VARCHAR(100) NOT NULL,
-    "dateOfBirth" DATE NOT NULL,
-    "email" VARCHAR(255) NOT NULL,
-    "speciality" VARCHAR(100) NOT NULL,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "providers_pkey" PRIMARY KEY ("id")
-);
-
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
@@ -108,21 +93,6 @@ CREATE INDEX "refresh_sessions_familyId_idx" ON "refresh_sessions"("familyId");
 
 -- CreateIndex
 CREATE INDEX "refresh_sessions_expiresAt_idx" ON "refresh_sessions"("expiresAt");
-
--- CreateIndex
-CREATE UNIQUE INDEX "providers_email_key" ON "providers"("email");
-
--- CreateIndex
-CREATE INDEX "providers_isActive_idx" ON "providers"("isActive");
-
--- CreateIndex
-CREATE INDEX "providers_speciality_idx" ON "providers"("speciality");
-
--- CreateIndex
-CREATE INDEX "providers_lastName_firstName_idx" ON "providers"("lastName", "firstName");
-
--- CreateIndex
-CREATE INDEX "providers_createdAt_idx" ON "providers"("createdAt");
 
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

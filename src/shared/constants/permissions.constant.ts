@@ -19,11 +19,6 @@ export const PERMISSIONS = {
   USER_EDIT: 'USER_EDIT',
   USER_DELETE: 'USER_DELETE',
 
-  PROVIDER_VIEW: 'PROVIDER_VIEW',
-  PROVIDER_CREATE: 'PROVIDER_CREATE',
-  PROVIDER_EDIT: 'PROVIDER_EDIT',
-  PROVIDER_DELETE: 'PROVIDER_DELETE',
-
   ROLE_MANAGE: 'ROLE_MANAGE',
 } as const;
 
@@ -36,10 +31,6 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   USER_CREATE: 'Create user accounts',
   USER_EDIT: 'Modify user accounts',
   USER_DELETE: 'Delete user accounts',
-  PROVIDER_VIEW: 'List and read providers',
-  PROVIDER_CREATE: 'Create providers',
-  PROVIDER_EDIT: 'Modify providers',
-  PROVIDER_DELETE: 'Delete providers',
   ROLE_MANAGE: 'Create roles and change their permissions',
 };
 
@@ -51,17 +42,13 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
  */
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, PermissionKey[]> = {
   [ROLES.SUPER_ADMIN]: ALL_PERMISSIONS,
-  [ROLES.ADMIN]: [
-    PERMISSIONS.USER_VIEW,
-    PERMISSIONS.USER_CREATE,
-    PERMISSIONS.USER_EDIT,
-    PERMISSIONS.PROVIDER_VIEW,
-    PERMISSIONS.PROVIDER_CREATE,
-    PERMISSIONS.PROVIDER_EDIT,
-    PERMISSIONS.PROVIDER_DELETE,
-  ],
-  // A standard user can read providers and nothing else. Editing their *own*
-  // profile is not a permission — it is an ownership rule, enforced in
-  // UserService. See docs/architecture.md on role vs ownership authorization.
-  [ROLES.USER]: [PERMISSIONS.PROVIDER_VIEW],
+  // An admin manages people but cannot delete them or reshape the role system —
+  // those stay with SUPER_ADMIN.
+  [ROLES.ADMIN]: [PERMISSIONS.USER_VIEW, PERMISSIONS.USER_CREATE, PERMISSIONS.USER_EDIT],
+  // A standard user holds no permissions at all. That is not an oversight:
+  // editing their *own* profile is an ownership rule enforced in UserService,
+  // not a permission. See docs/architecture.md on role vs ownership
+  // authorization. Grant this role whatever your domain's read permissions turn
+  // out to be.
+  [ROLES.USER]: [],
 };

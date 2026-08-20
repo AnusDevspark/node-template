@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { ERROR_CODES } from '@/errors';
 import { isDatabaseReachable } from '@/database/prisma';
 import { env } from '@/config/env';
 import { SERVICE_NAME, SERVICE_VERSION } from '@/config/constants';
@@ -21,6 +22,10 @@ import { SERVICE_NAME, SERVICE_VERSION } from '@/config/constants';
  *
  * None of them report version details that are not already public, and none
  * report connection strings or dependency hostnames.
+ *
+ * On failure these still carry `data` (a caller wants to know *which* check
+ * failed) but they also carry `message` and `code`, so a client that narrows on
+ * `success === false` finds the same fields here as on every other error.
  */
 export class HealthController {
   live = (_req: Request, res: Response): void => {
@@ -38,6 +43,9 @@ export class HealthController {
     // for a 500.
     res.status(databaseReachable ? 200 : 503).json({
       success: databaseReachable,
+      ...(databaseReachable
+        ? {}
+        : { message: 'Service not ready', code: ERROR_CODES.SERVICE_UNAVAILABLE }),
       data: {
         status: databaseReachable ? 'ready' : 'not_ready',
         checks: { database: databaseReachable ? 'up' : 'down' },
@@ -50,6 +58,9 @@ export class HealthController {
 
     res.status(databaseReachable ? 200 : 503).json({
       success: databaseReachable,
+      ...(databaseReachable
+        ? {}
+        : { message: 'Service degraded', code: ERROR_CODES.SERVICE_UNAVAILABLE }),
       data: {
         status: databaseReachable ? 'healthy' : 'degraded',
         service: SERVICE_NAME,

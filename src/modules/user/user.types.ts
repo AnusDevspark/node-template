@@ -21,6 +21,23 @@ export interface UserResponse {
   updatedAt: string;
 }
 
+/**
+ * The signed-in user's own view of themselves, returned by /auth/login,
+ * /auth/register, /auth/refresh and /auth/me.
+ *
+ * It carries `permissions` because a frontend needs them to decide what to
+ * render — which links to show, which buttons to disable. That is UX only; the
+ * API re-checks every permission on every request regardless of what the client
+ * believes. Permissions are resolved from the role at request time rather than
+ * stored on the user, so revoking one takes effect without re-issuing a token.
+ *
+ * Deliberately NOT part of `UserResponse`: /users list and detail describe other
+ * people, and one user's permission set is not another user's business.
+ */
+export interface SessionUserResponse extends UserResponse {
+  permissions: string[];
+}
+
 /** What the repository returns for a full read — internal to the module. */
 export interface UserWithRole {
   id: string;

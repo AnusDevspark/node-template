@@ -46,20 +46,20 @@ npm run db:wait               # blocks until it accepts connections
 npm run prisma:migrate        # creates the schema
 npm run prisma:seed           # roles, permissions, admin, sample data
 
-npm run dev                   # http://localhost:3000
+npm run dev                   # http://localhost:4000
 ```
 
 Then:
 crea
 
-- API root — <http://localhost:3000/api/v1>
-- Docs — <http://localhost:3000/api/docs>
-- Health — <http://localhost:3000/health>
+- API root — <http://localhost:4000/api/v1>
+- Docs — <http://localhost:4000/api/docs>
+- Health — <http://localhost:4000/health>
 
 Sign in with the seeded admin (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, default `admin@example.com` / `ChangeMe123!`):
 
 ```bash
-curl -X POST localhost:3000/api/v1/auth/login \
+curl -X POST localhost:4000/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"ChangeMe123!"}'
 ```
@@ -75,7 +75,7 @@ Every variable is validated by `src/config/env.ts` at startup. A missing or malf
 | Variable                 | Default                 | Notes                                                                  |
 | ------------------------ | ----------------------- | ---------------------------------------------------------------------- |
 | `NODE_ENV`               | `development`           | `development` \| `test` \| `production`                                |
-| `PORT`                   | `3000`                  |                                                                        |
+| `PORT`                   | `4000`                  |                                                                        |
 | `TRUST_PROXY_HOPS`       | `0`                     | Number of proxies in front. **Not** `true` — see [Security](#security) |
 | `DATABASE_URL`           | —                       | **Required**                                                           |
 | `TEST_DATABASE_URL`      | —                       | Must differ from `DATABASE_URL`; tests truncate it                     |
@@ -86,7 +86,7 @@ Every variable is validated by `src/config/env.ts` at startup. A missing or malf
 | `ARGON2_MEMORY_COST`     | `19456`                 | KiB. Raise this first to harden hashing                                |
 | `ARGON2_TIME_COST`       | `2`                     |                                                                        |
 | `ARGON2_PARALLELISM`     | `1`                     |                                                                        |
-| `CORS_ORIGIN`            | `http://localhost:3000` | Comma-separated allow-list. Never `*`                                  |
+| `CORS_ORIGIN`            | `http://localhost:4000` | Comma-separated allow-list. Never `*`                                  |
 | `LOG_LEVEL`              | `info`                  | `trace`…`fatal`, or `silent`                                           |
 | `LOG_PRETTY`             | `false`                 | Human-readable logs in dev; keep JSON in production                    |
 | `RATE_LIMIT_MAX`         | `300`                   | General limiter, per window                                            |
@@ -197,7 +197,7 @@ src/
     ├── rbac/                 role → permission resolution (cached)
     ├── auth/                 register, login, refresh, logout, me, password
     ├── user/                 user administration
-    └── provider/             example business module — the one to copy
+    └── user/                 the worked example — the one to copy
 
 prisma/     schema.prisma, migrations, seed.ts
 tests/      unit/, integration/, helpers/, setup/
@@ -255,11 +255,11 @@ Password reset, email verification. `EmailService` is a working interface with a
 **Authentication** asks "who are you?". **Authorization** asks "are you allowed?". They are separate middleware.
 
 ```ts
-router.post('/', authenticate, requirePermission(PERMISSIONS.PROVIDER_CREATE), controller.create);
+router.post('/', authenticate, requirePermission(PERMISSIONS.USER_CREATE), controller.create);
 ```
 
 - `authorizeRoles('ADMIN')` — coarse, for whole-surface restrictions.
-- `requirePermission('PROVIDER_CREATE')` — **prefer this.** Grants live in the database, so an operator can create a "SUPPORT" role that reads users but cannot delete them, with no code change.
+- `requirePermission('USER_CREATE')` — **prefer this.** Grants live in the database, so an operator can create a "SUPPORT" role that reads users but cannot delete them, with no code change.
 
 **Permission keys live in code** (`shared/constants/permissions.constant.ts`) because call sites must be typo-proof. **Grants live in the database** because that is what operators need to change at runtime. Seeding only adds grants; it never deletes ones made by hand.
 
@@ -276,12 +276,12 @@ There is an escalation guard: **nobody may change their own role or status**, re
 Every list endpoint follows one shape:
 
 ```
-GET /api/v1/providers?page=1&pageSize=20&search=john&isActive=true
-    &speciality=Cardiology&sortBy=createdAt&sortOrder=desc
+GET /api/v1/users?page=1&pageSize=20&search=john&status=ACTIVE
+    &role=ADMIN&sortBy=createdAt&sortOrder=desc
 ```
 
 - **Pagination** — defaults 1/20, hard max 100. Without the cap, `pageSize=1000000` is a free table scan.
-- **Sorting** — each module whitelists its sortable fields (`PROVIDER_SORT_FIELDS`). An unlisted field is a 400, never passed to Prisma.
+- **Sorting** — each module whitelists its sortable fields (`USER_SORT_FIELDS`). An unlisted field is a 400, never passed to Prisma.
 - **Filtering** — each module names its filters explicitly. The query object is never forwarded whole.
 - **Search** — case-insensitive (`ILIKE`) across chosen fields. Note this is **unindexed**; a btree cannot serve `ILIKE '%term%'`. Fine at moderate scale; add a `pg_trgm` GIN index when it stops being fine.
 
@@ -292,13 +292,13 @@ GET /api/v1/providers?page=1&pageSize=20&search=john&isActive=true
 Throw, never build a response:
 
 ```ts
-throw new NotFoundError('Provider not found');
+throw new NotFoundError('User not found');
 ```
 
 becomes
 
 ```json
-{ "success": false, "message": "Provider not found", "code": "NOT_FOUND", "requestId": "..." }
+{ "success": false, "message": "User not found", "code": "NOT_FOUND", "requestId": "..." }
 ```
 
 The global handler understands `AppError`, Zod errors, JWT errors, Prisma codes (P2002 → 409, P2025 → 404, P2003 → 400), malformed JSON, oversized payloads, and anything unknown. Stack traces never leave the server in production; unexpected errors are logged with full context and reported generically.
@@ -348,9 +348,9 @@ Logs redact `authorization`, `cookie`, and any field named like a password or to
 
 ## Adding a new module
 
-Copy `src/modules/provider/` and work through it. In short: add the model and its indexes to `prisma/schema.prisma`, add permissions, then write `*.schema.ts`, `*.repository.ts`, `*.service.ts`, `*.controller.ts` and `*.routes.ts` (plus `*.types.ts` and `*.mapper.ts` in most cases). Wire it in `src/routes/index.ts`, document it in `src/docs/openapi.ts`, and test it.
+Copy `src/modules/user/` and work through it. In short: add the model and its indexes to `prisma/schema.prisma`, add permissions, then write `*.schema.ts`, `*.repository.ts`, `*.service.ts`, `*.controller.ts` and `*.routes.ts` (plus `*.types.ts` and `*.mapper.ts` in most cases). Wire it in `src/routes/index.ts`, document it in `src/docs/openapi.ts`, and test it.
 
-**→ [docs/adding-a-module.md](./docs/adding-a-module.md)** walks through a complete Appointment module — every file, full contents, with a foreign key, an enum filter, a date-range filter and a non-CRUD business action. All of it compiled and ran before it was written down.
+**→ [docs/adding-a-module.md](./docs/adding-a-module.md)** walks through a complete Task module — every file, full contents, with a foreign key to `User`, an enum filter, a date-range filter and a non-CRUD business action.
 
 ---
 

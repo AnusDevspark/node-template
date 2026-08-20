@@ -9,8 +9,9 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '@/shared/
 import { generateFamilyId, hashToken } from '@/shared/utils/token-hash.util';
 import { ROLES } from '@/shared/constants/roles.constant';
 import type { UserRepository } from '@/modules/user/user.repository';
-import { mapUserToResponse } from '@/modules/user/user.mapper';
-import type { UserWithRole } from '@/modules/user/user.types';
+import { mapUserToSessionResponse } from '@/modules/user/user.mapper';
+import type { SessionUserResponse, UserWithRole } from '@/modules/user/user.types';
+import type { RbacService } from '@/modules/rbac/rbac.service';
 import type { AuthRepository } from '@/modules/auth/auth.repository';
 import type { EmailService } from '@/modules/auth/email.service';
 import type { AuthResult, AuthTokens, SessionContext } from '@/modules/auth/auth.types';
@@ -48,6 +49,7 @@ export class AuthService {
     private readonly prisma: PrismaClientInstance,
     private readonly userRepository: UserRepository,
     private readonly authRepository: AuthRepository,
+    private readonly rbacService: RbacService,
     private readonly emailService: EmailService,
   ) {}
 
@@ -63,7 +65,7 @@ export class AuthService {
       // which leaves a legitimate user stuck with no explanation. The login and
       // password-reset flows, where enumeration actually helps an attacker, do
       // not reveal it.
-      throw new ConflictError('An account with this email already exists');
+      throw new ConflictError('An account with this email already exists', 'email');
     }
 
     // Self-service signup always gets the standard role. The request cannot
@@ -89,7 +91,7 @@ export class AuthService {
 
     logger.info({ userId: user.id }, 'user registered');
 
-    return { user: mapUserToResponse(user), tokens };
+    return { user: await this.toSessionUser(user), tokens };
   }
 
   // -------------------------------------------------------------------------
@@ -136,7 +138,7 @@ export class AuthService {
 
     logger.info({ userId: user.id }, 'user logged in');
 
-    return { user: mapUserToResponse(user), tokens };
+    return { user: await this.toSessionUser(user), tokens };
   }
 
   // -------------------------------------------------------------------------
@@ -205,7 +207,26 @@ export class AuthService {
       return issued;
     });
 
-    return { user: mapUserToResponse(user), tokens };
+    return { user: await this.toSessionUser(user), tokens };
+  }
+
+  // -------------------------------------------------------------------------
+  // Current session
+  // -------------------------------------------------------------------------
+
+  /**
+   * The caller's own profile plus their permission keys — what GET /auth/me
+   * returns.
+   *
+   * This lives here rather than on UserService because it describes a *session*,
+   * not a user record: UserService.getProfile answers "who is this person",
+   * this answers "what can the person holding this token do right now".
+   */
+  async getSessionUser(userId: string): Promise<SessionUserResponse> {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    return this.toSessionUser(user);
   }
 
   // -------------------------------------------------------------------------
@@ -329,6 +350,17 @@ export class AuthService {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * Attaches the role's permission keys to a user DTO.
+   *
+   * RbacService caches per role for 60s, so the four call sites here cost at
+   * most one query per role per minute rather than one per login.
+   */
+  private async toSessionUser(user: UserWithRole): Promise<SessionUserResponse> {
+    const permissions = await this.rbacService.getPermissionsForRole(user.role.name);
+    return mapUserToSessionResponse(user, permissions);
+  }
 
   /**
    * Signs a token pair and records the refresh session.

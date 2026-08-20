@@ -14,14 +14,6 @@ import {
   updateUserSchema,
   userIdParamSchema,
 } from '@/modules/user/user.schema';
-import {
-  createProviderSchema,
-  importProvidersSchema,
-  listActiveProvidersQuerySchema,
-  listProvidersQuerySchema,
-  providerIdParamSchema,
-  updateProviderSchema,
-} from '@/modules/provider/provider.schema';
 
 /**
  * ===========================================================================
@@ -31,7 +23,7 @@ import {
  *
  * The alternative — hand-written JSDoc annotations or a separate YAML file — is
  * two definitions of every request shape that drift apart silently. Here, adding
- * a required field to `createProviderSchema` changes the validation and the
+ * a required field to `createUserSchema` changes the validation and the
  * documentation in the same commit, because they are the same object.
  *
  * `zod-openapi` was chosen over `@asteasolutions/zod-to-openapi` because it
@@ -72,17 +64,13 @@ const userResponseSchema = z.object({
   updatedAt: z.string(),
 });
 
-const providerResponseSchema = z.object({
-  id: z.uuid(),
-  firstName: z.string(),
-  lastName: z.string(),
-  fullName: z.string(),
-  dateOfBirth: z.string(),
-  email: z.email(),
-  speciality: z.string(),
-  isActive: z.boolean(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+/**
+ * What the caller gets back about *themselves*. Identical to userResponseSchema
+ * plus the permission keys their role grants, which a client needs to decide
+ * what to render. /users never returns this — see SessionUserResponse.
+ */
+const sessionUserResponseSchema = userResponseSchema.extend({
+  permissions: z.array(z.string()),
 });
 
 const authTokensSchema = z.object({
@@ -95,7 +83,7 @@ const authTokensSchema = z.object({
 const authResultSchema = z.object({
   success: z.literal(true),
   message: z.string().optional(),
-  data: z.object({ user: userResponseSchema, tokens: authTokensSchema }),
+  data: z.object({ user: sessionUserResponseSchema, tokens: authTokensSchema }),
 });
 
 /** Wraps a payload schema in the standard success envelope. */
@@ -183,7 +171,6 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
     tags: [
       { name: 'Auth', description: 'Registration, login, token lifecycle' },
       { name: 'Users', description: 'User administration (permission gated)' },
-      { name: 'Providers', description: 'Example business module' },
     ],
     components: {
       securitySchemes: {
@@ -268,11 +255,13 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
         get: {
           tags: ['Auth'],
           summary: 'Current user profile',
+          description:
+            'Returns the caller plus the permission keys their role grants. Clients use those keys for rendering decisions only — every endpoint re-checks permissions server-side.',
           security: bearerAuth,
           responses: {
             '200': {
-              description: 'The authenticated user',
-              content: { 'application/json': { schema: successOf(userResponseSchema) } },
+              description: 'The authenticated user and their permissions',
+              content: { 'application/json': { schema: successOf(sessionUserResponseSchema) } },
             },
             ...commonErrors,
           },
@@ -370,124 +359,6 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           description: 'Requires USER_DELETE. You cannot delete your own account.',
           security: bearerAuth,
           requestParams: { path: userIdParamSchema },
-          responses: {
-            '204': { description: 'Deleted' },
-            ...notFoundResponse,
-            ...commonErrors,
-          },
-        },
-      },
-
-      // ----------------------------------------------------------- Providers
-      '/providers': {
-        get: {
-          tags: ['Providers'],
-          summary: 'List providers',
-          description:
-            'Supports pagination, whitelisted filtering (isActive, speciality), case-insensitive search across name and email, and whitelisted sorting. Requires PROVIDER_VIEW.',
-          security: bearerAuth,
-          requestParams: { query: listProvidersQuerySchema },
-          responses: {
-            '200': {
-              description: 'Paginated providers',
-              content: { 'application/json': { schema: paginatedOf(providerResponseSchema) } },
-            },
-            ...commonErrors,
-          },
-        },
-        post: {
-          tags: ['Providers'],
-          summary: 'Create a provider',
-          description: 'Requires PROVIDER_CREATE.',
-          security: bearerAuth,
-          requestBody: { content: { 'application/json': { schema: createProviderSchema } } },
-          responses: {
-            '201': {
-              description: 'Provider created',
-              content: { 'application/json': { schema: successOf(providerResponseSchema) } },
-            },
-            ...conflictResponse,
-            ...commonErrors,
-          },
-        },
-      },
-
-      '/providers/import': {
-        post: {
-          tags: ['Providers'],
-          summary: 'Bulk import providers atomically',
-          description:
-            'Creates up to 100 providers in a single transaction. If any row fails — a duplicate email in the payload or already in the database — the entire batch is rolled back. Requires PROVIDER_CREATE.',
-          security: bearerAuth,
-          requestBody: { content: { 'application/json': { schema: importProvidersSchema } } },
-          responses: {
-            '201': {
-              description: 'All providers created',
-              content: {
-                'application/json': { schema: successOf(z.array(providerResponseSchema)) },
-              },
-            },
-            ...conflictResponse,
-            ...commonErrors,
-          },
-        },
-      },
-
-      '/providers/active': {
-        get: {
-          tags: ['Providers'],
-          summary: 'List active providers',
-          description: 'Convenience endpoint equivalent to /providers?isActive=true.',
-          security: bearerAuth,
-          requestParams: { query: listActiveProvidersQuerySchema },
-          responses: {
-            '200': {
-              description: 'Paginated active providers',
-              content: { 'application/json': { schema: paginatedOf(providerResponseSchema) } },
-            },
-            ...commonErrors,
-          },
-        },
-      },
-
-      '/providers/{id}': {
-        get: {
-          tags: ['Providers'],
-          summary: 'Get a provider',
-          security: bearerAuth,
-          requestParams: { path: providerIdParamSchema },
-          responses: {
-            '200': {
-              description: 'The provider',
-              content: { 'application/json': { schema: successOf(providerResponseSchema) } },
-            },
-            ...notFoundResponse,
-            ...commonErrors,
-          },
-        },
-        patch: {
-          tags: ['Providers'],
-          summary: 'Update a provider',
-          description: 'Requires PROVIDER_EDIT.',
-          security: bearerAuth,
-          requestParams: { path: providerIdParamSchema },
-          requestBody: { content: { 'application/json': { schema: updateProviderSchema } } },
-          responses: {
-            '200': {
-              description: 'Updated provider',
-              content: { 'application/json': { schema: successOf(providerResponseSchema) } },
-            },
-            ...notFoundResponse,
-            ...conflictResponse,
-            ...commonErrors,
-          },
-        },
-        delete: {
-          tags: ['Providers'],
-          summary: 'Delete a provider',
-          description: 'Requires PROVIDER_DELETE. This is a hard delete.',
-          security: bearerAuth,
-          requestParams: { path: providerIdParamSchema },
           responses: {
             '204': { description: 'Deleted' },
             ...notFoundResponse,

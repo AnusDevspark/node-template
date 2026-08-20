@@ -16,4 +16,4 @@ Start with **getting-started**, then **adding-a-module**. Everything else is ref
 
 ## The one-paragraph version
 
-Requests flow `middleware → route → validate → authenticate → authorize → controller → service → repository → Prisma`. Controllers only speak HTTP, services hold business rules and know nothing about Express, repositories only read and write. Everything is wired by hand in `src/routes/index.ts`. You throw errors and one global handler formats them. You validate with Zod and the same schemas generate the OpenAPI docs. To add a feature, copy `src/modules/provider/`.
+Requests flow `middleware → route → validate → authenticate → authorize → controller → service → repository → Prisma`. Controllers only speak HTTP, services hold business rules and know nothing about Express, repositories only read and write. Everything is wired by hand in `src/routes/index.ts`. You throw errors and one global handler formats them. You validate with Zod and the same schemas generate the OpenAPI docs. To add a feature, copy `src/modules/user/`.

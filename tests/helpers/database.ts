@@ -12,22 +12,15 @@ import { ROLES, type RoleName } from '@/shared/constants/roles.constant';
  *     about foreign key ordering when CASCADE is used.
  *   - Recreating the schema per test would cost a migration run each time.
  *   - A transaction-per-test that rolls back is faster still, but the app opens
- *     its own transactions (see ProviderService.importProviders) and nesting
- *     them changes the behaviour being tested.
+ *     its own transactions (see AuthService.refresh) and nesting them changes
+ *     the behaviour being tested.
  *
  * Reference data (roles and permissions) is re-seeded after each truncate,
  * because the application cannot function without it.
  */
 
 /** Every table, in one statement. Add new tables here when the schema grows. */
-const TABLES = [
-  'refresh_sessions',
-  'role_permissions',
-  'users',
-  'permissions',
-  'roles',
-  'providers',
-];
+const TABLES = ['refresh_sessions', 'role_permissions', 'users', 'permissions', 'roles'];
 
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(

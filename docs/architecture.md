@@ -12,7 +12,7 @@ Things deliberately **not** built: `BaseController`/`BaseService`/`BaseRepositor
 
 ---
 
-## Request walkthrough: `POST /api/v1/providers`
+## Request walkthrough: `POST /api/v1/users`
 
 **1. Request arrives.** Express receives it. `trust proxy` is set to a hop count, so `req.ip` is the real client address rather than the proxy's — and a client cannot forge it by sending its own `X-Forwarded-For`.
 
@@ -28,25 +28,25 @@ Things deliberately **not** built: `BaseController`/`BaseService`/`BaseRepositor
 
 **7. Rate limit checked.** The general limiter counts against `req.ip`. Over the limit → `TooManyRequestsError` → the standard 429 envelope.
 
-**8. Route matched.** `/api/v1` is stripped by the mount in `routes/index.ts`; `providerRouter` matches `POST /`.
+**8. Route matched.** `/api/v1` is stripped by the mount in `routes/index.ts`; `userRouter` matches `POST /`.
 
 **9. Authenticate.** The bearer token is extracted and verified — signature, expiry, issuer, audience, and the `type` claim (so an access token cannot be replayed at the refresh endpoint). Then a single indexed read confirms the account still exists and is `ACTIVE`, and re-reads the role. This costs one primary-key lookup and buys immediate revocation: a suspended user loses access on their next request instead of up to 15 minutes later. `req.user` is set.
 
-**10. Authorize.** `requirePermission(PROVIDER_CREATE)` asks `RbacService`, which resolves the role's permissions from a 60-second in-process cache (a database read on a miss). Not held → 403 with `PERMISSION_DENIED`.
+**10. Authorize.** `requirePermission(USER_CREATE)` asks `RbacService`, which resolves the role's permissions from a 60-second in-process cache (a database read on a miss). Not held → 403 with `PERMISSION_DENIED`.
 
-**11. Validate.** `validate({ body: createProviderSchema })` parses the body. Zod strips unknown keys, so `req.body` afterwards contains **only** declared fields — an injected `"id"` or `"role"` is gone before any application code sees it. Emails are lowercased, names trimmed, `dateOfBirth` parsed as UTC midnight. On failure, every field error is collected into one 400 rather than reporting them one at a time.
+**11. Validate.** `validate({ body: createUserSchema })` parses the body. Zod strips unknown keys, so `req.body` afterwards contains **only** declared fields — an injected `"id"` or `"role"` is gone before any application code sees it. Emails are lowercased and names trimmed. On failure, every field error is collected into one 400 rather than reporting them one at a time.
 
-**12. Controller.** Reads `req.body`, calls `providerService.createProvider(input)`, sends the response. Three lines. No try/catch — Express 5 forwards a rejected promise to the error handler automatically.
+**12. Controller.** Reads `req.body`, calls `userService.createUser(input)`, sends the response. Three lines. No try/catch — Express 5 forwards a rejected promise to the error handler automatically.
 
 **13. Service.** Applies the business rule: is this email already taken? If so, `ConflictError`. Then it builds the create payload **by naming each field**, so nothing unexpected can reach the database even if validation were bypassed.
 
-**14. Repository.** Executes `prisma.provider.create` with an explicit `data` object, wrapped in `withPrismaErrors` so a unique-constraint violation becomes a `ConflictError` rather than leaking `P2002`.
+**14. Repository.** Executes `prisma.user.create` with an explicit `data` object, wrapped in `withPrismaErrors` so a unique-constraint violation becomes a `ConflictError` rather than leaking `P2002`.
 
 **15. PostgreSQL.** The row is written; the unique index is the real guarantee against a concurrent duplicate that passed the service check.
 
-**16. Mapper.** `mapProviderToResponse` builds the DTO field by field — never a spread, which would leak whatever column gets added next. Dates become ISO strings; `dateOfBirth` becomes `YYYY-MM-DD` because only the calendar date was stored.
+**16. Mapper.** `mapUserToResponse` builds the DTO field by field — never a spread, which would leak whatever column gets added next. Dates become ISO-8601 strings, and `passwordHash` is simply never named, so it cannot leak.
 
-**17. Response.** `sendCreated(res, provider, 'Provider created successfully.')` → 201 with the standard envelope.
+**17. Response.** `sendCreated(res, user, 'User created successfully.')` → 201 with the standard envelope.
 
 **18. Logged.** One line: request id, method, path, 201, duration.
 
@@ -95,11 +95,11 @@ On Express 4 a rejected promise never reached the error middleware, which is why
 
 Permission **keys** live in code (call sites must be typo-proof); **grants** live in the database (operators must change them without a deploy). Adding multi-role later is a join table, a changed lookup in `RbacRepository`, and a `roles` array in the mapper. Nothing above the service layer changes.
 
-### Hard delete for Provider
+### Hard delete for User
 
-`isActive` already models "not currently practising", which is the real business concept. A `deletedAt` column would force a filter into every query and every uniqueness check, and break the unique email constraint (a deleted provider's address would stay reserved).
+`status` already models "should not be able to sign in", which is the real business concept — an account can be `INACTIVE` or `SUSPENDED` without being gone. A `deletedAt` column on top of that would force a filter into every query and every uniqueness check, and break the unique email constraint (a deleted account's address would stay reserved forever).
 
-**To add soft delete later:** add `deletedAt DateTime?`, filter it in `ProviderRepository.buildWhere` and `findById`, and switch the unique index to a partial one (`WHERE deleted_at IS NULL`). Two methods change; no service or controller does. That containment is the reason the repository layer exists.
+**To add soft delete later:** add `deletedAt DateTime?`, filter it in `UserRepository.buildWhere` and `findById`, and switch the unique index to a partial one (`WHERE deleted_at IS NULL`). Two methods change; no service or controller does. That containment is the reason the repository layer exists.
 
 Use soft delete when there is a real requirement — regulatory retention, undo, or referential history — not by default.
 
@@ -113,7 +113,7 @@ Two repositories with materially different query shapes. A `BaseRepository<T>` w
 
 ### Transactions belong to services
 
-The service opens the transaction, because "these operations belong together" is a business statement. Repositories accept an optional transaction client and work identically inside or outside one. Push the boundary down into the repository and two repositories can no longer be composed into one atomic operation. See `ProviderService.importProviders` and `AuthService.refresh`.
+The service opens the transaction, because "these operations belong together" is a business statement. Repositories accept an optional transaction client and work identically inside or outside one. Push the boundary down into the repository and two repositories can no longer be composed into one atomic operation. See `AuthService.changePassword` and `AuthService.refresh`.
 
 ### OpenAPI from the validation schemas
 
@@ -131,10 +131,7 @@ Each index exists for a query that actually runs:
 | `refresh_sessions.tokenHash` (unique) | Every refresh                      |
 | `refresh_sessions.familyId`           | Replay revocation                  |
 | `refresh_sessions.expiresAt`          | Cleanup                            |
-| `providers.isActive`                  | `/providers/active` and the filter |
-| `providers.speciality`                | The filter                         |
-| `providers.lastName, firstName`       | Default name sort                  |
-| `providers.createdAt`                 | Recency sort                       |
+| `users.createdAt`                     | Recency sort, the default ordering  |
 
 Do not index every column: each one slows writes and consumes space. Add indexes from `EXPLAIN ANALYZE` on real queries, not from intuition.
 
@@ -189,7 +186,7 @@ Not global. A duplicate `GET` is harmless and a duplicate `PATCH` with the same 
 
 ### Audit logging — `src/modules/audit/`
 
-Who changed a user, who altered permissions, who deleted a provider. An `AuditService` called from **services** (which know the business meaning of the change), not from repositories (which see only rows).
+Who changed a user, who altered permissions, who deleted an account. An `AuditService` called from **services** (which know the business meaning of the change), not from repositories (which see only rows).
 
 Write it when you have a compliance requirement or a real "who did this?" incident. A generic audit framework built speculatively logs everything, is read by nobody, and grows faster than the data it describes.
 
@@ -206,7 +203,7 @@ Add in this order, driven by pain:
 
 ## Module boundaries
 
-Current modules: `auth`, `user`, `provider`, `rbac`, `health`. Future ones might be `appointment`, `billing`, `notification`.
+Current modules: `auth`, `user`, `rbac`, `health`. Yours might be `billing`, `notification`, `report`.
 
 **The rule:** a module owns its tables and exposes a service (or repository) as its public surface. Never reach into another module's internals from across a boundary.
 

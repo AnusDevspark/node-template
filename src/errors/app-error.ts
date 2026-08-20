@@ -16,6 +16,8 @@ export const ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'RATE_LIMITED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** A dependency is down. Emitted by the health endpoints; retry is sensible. */
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
 
   // Authentication — the client behaves differently for each of these.
   AUTH_TOKEN_MISSING: 'AUTH_TOKEN_MISSING',

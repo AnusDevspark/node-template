@@ -67,7 +67,10 @@ const corsOptions: CorsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-  exposedHeaders: ['X-Request-Id'],
+  // A cross-origin browser client can only read headers listed here. Without
+  // the rate-limit trio, frontend code has no way to back off intelligently on
+  // a 429 — it can only guess.
+  exposedHeaders: ['X-Request-Id', 'RateLimit', 'RateLimit-Policy', 'Retry-After'],
   // Cache the preflight result for 24h so browsers stop re-asking.
   maxAge: 86_400,
 };
